@@ -1,16 +1,20 @@
 #!/usr/bin/python
 
-from multiprocessing import Pool
-from subprocess import call, check_call, Popen
+from multiprocessing.dummy import Pool
+from subprocess import call, Popen
 from tempfile import NamedTemporaryFile
 import time
 
 from boto import ec2
 
 TARGETS_FILE = "./targets"
-DURATION = "20s"
+
+DURATION = "5s"
+RATE = 500
+
+KEY_NAME = 'oremj'
 INSTANCE_NAME = 'vegeta-loadtest'
-INSTANCE_COUNT = 10
+INSTANCE_COUNT = 20
 AMI_ID = "ami-6cba8329"
 
 c = ec2.connect_to_region('us-west-1')
@@ -19,7 +23,7 @@ c = ec2.connect_to_region('us-west-1')
 def run_instances(count):
     r = c.run_instances(
         image_id=AMI_ID,
-        key_name="oremj",
+        key_name=KEY_NAME,
         security_groups=["wide-open"],
         instance_type="m3.large",
         max_count=count,
@@ -36,44 +40,42 @@ def run_instances(count):
 
 def get_hosts():
     instances = c.get_only_instances(filters={'tag:Name': INSTANCE_NAME})
-
-    if len(instances) < INSTANCE_COUNT:
-        run_instances(INSTANCE_COUNT - len(instances))
+    running_instances = [i for i in instances if i.public_dns_name]
+    if len(running_instances) < INSTANCE_COUNT:
+        run_instances(INSTANCE_COUNT - len(running_instances))
+        time.sleep(120)
         instances = c.get_only_instances(filters={'tag:Name': INSTANCE_NAME})
 
-    return [i.public_dns_name for i in instances]
+    return [i.public_dns_name for i in instances if i.public_dns_name]
 
 
 def copy_vegeta(host):
-    check_call(['scp', TARGETS_FILE, host + ":/tmp/."])
+    call(['scp', TARGETS_FILE, host + ":/tmp/."])
 
     if call(['ssh', host, '[[ -f /tmp/vegeta ]]']) == 0:
         return
 
-    check_call(['scp', './vegeta', host + ":/tmp/."])
+    call(['scp', './vegeta', host + ":/tmp/."])
 
 
 def run_loadtest(args):
     host, outfile = args
-    p = Popen(['ssh', host,
-               '/tmp/vegeta attack -duration=%s -targets /tmp/targets' % DURATION],  # noqa
-              stdout=outfile)
+    p = Popen(['ssh', '-t', host,
+               '/tmp/vegeta attack '
+               '-duration=%s '
+               '-targets /tmp/targets '
+               '-rate=%d' % (DURATION, RATE)],  # noqa
+              stdout=outfile.file.fileno())
     p.communicate()
+    if p.returncode != 0:
+        return None
+
+    return outfile.name
 
 
 def print_report(files):
+    print ','.join(files)
     Popen(['./vegeta', 'report', '-input', ','.join(files)]).communicate()  # noqa
 
 
-hosts = get_hosts()
-
-tmp_files = [NamedTemporaryFile() for t in range(len(hosts))]
-tmpfile_names = [t.name for t in tmp_files]
-tmpfile_fds = [t.file.fileno() for t in tmp_files]
-
-process_pool = Pool(processes=10)
-process_pool.map(copy_vegeta, hosts)
-
-process_pool.map(run_loadtest, zip(hosts, tmpfile_fds))
-
-print_report(tmpfile_names)
+print " ".join(get_hosts())

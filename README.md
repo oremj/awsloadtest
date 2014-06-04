@@ -6,5 +6,5 @@ Fires up ec2 instances and runs Vegeta across them.
 Fill out [`./targets`](https://github.com/tsenart/vegeta#-targets)
 ```
 ./build
-./loadtest
+go run loadtest.go $(./get_hosts)
 ```
