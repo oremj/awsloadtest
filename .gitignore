@@ -1,0 +1,4 @@
+/vegeta
+/.gobuild
+/targets
+*.pyc

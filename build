@@ -1,0 +1,12 @@
+#!/bin/bash
+
+set -e -u
+
+cd $(dirname "$0")
+
+mkdir -p .gobuild
+export GOPATH=$PWD/.gobuild
+export GOBIN=$PWD
+
+go get github.com/tsenart/vegeta
+go install github.com/tsenart/vegeta
